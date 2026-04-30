@@ -1,0 +1,1286 @@
+{
+  "name": "My workflow 2",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-intake",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "21965ee7-8ad4-4c12-94bf-de97cd42c6d6",
+      "name": "Webhook",
+      "webhookId": "34ac4027-220e-4e0a-b6dd-28cc148b4f6e"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"response_format\": { \"type\": \"json_object\" },\n  \"temperature\": 0.3,\n  \"max_tokens\": 1000,\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are an ICP scoring assistant. Always return valid JSON only. No prose, no markdown.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify($json.user_message) }}\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        832,
+        0
+      ],
+      "id": "63495c1a-a0f1-43f3-8b86-7a0f15130900",
+      "name": "ICP Match",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "r9JdvXc2Vm48xKot",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.apollo.io/api/v1/organizations/enrich",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "domain",
+              "value": "={{ $json.domain }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "mmEkfYVPlxSacOzQb2VQVg"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        416,
+        0
+      ],
+      "id": "27bd39bf-9288-4c13-bb22-c370e6031e11",
+      "name": "Apollo Enrichment"
+    },
+    {
+      "parameters": {
+        "jsCode": "const org = $input.first().json.organization || {};\nconst jobTitle = $('Webhook').first().json.body['Job Title '] || 'Unknown';\n\nconst userMessage = `Evaluate this company against our ICP and return a JSON assessment.\n\nICP DEFINITION:\n- Industry: B2B SaaS, FinTech, HR Tech, AI/Tech, or Professional Services\n- Company size: 50-10000 employees (no upper limit penalty — larger companies are stronger fits)\n- Geography: US or UK preferred but not required\n- Signals: Modern tech stack, growth-stage or established SaaS, has a sales or revenue team\n- Job title signals: VP, Director, Head of, C-suite, Founder, or RevOps/GTM roles\n\nSCORING GUIDE — be decisive:\n- Score 8-10 = Hot: clear B2B SaaS or FinTech company with 100+ employees and a sales team\n- Score 5-7 = Warm: B2B company but missing 1-2 key criteria\n- Score 1-4 = Cold: consumer company, tiny company under 20 employees, or no clear sales motion\n\nCRITICAL EXAMPLES — use these as your calibration:\n- Rippling (HR SaaS, 3000+ employees, US) = fit_score 9, fit_tier Hot\n- Ramp (FinTech SaaS, 1000+ employees, US) = fit_score 9, fit_tier Hot\n- Notion (B2B SaaS, 1000+ employees, US, productivity and collaboration tool) = fit_score 8, fit_tier Hot\n- A 3-person health coaching company = fit_score 2, fit_tier Cold\n\nWhen in doubt between Hot and Warm, choose Hot if the company is clearly B2B SaaS or FinTech with 100+ employees.\n\nCOMPANY DATA:\nCompany Name: ${org.name || 'Unknown'}\nIndustry: ${org.industry || 'Unknown'}\nEmployee Count: ${org.estimated_num_employees || 'Unknown'}\nAnnual Revenue: ${org.organization_revenue_printed || 'Unknown'}\nTech Stack: ${(org.technology_names || []).join(', ')}\nDescription: ${org.short_description || 'Unknown'}\nFounded: ${org.founded_year || 'Unknown'}\nFunding Stage: ${org.latest_funding_stage || 'Unknown'}\n\nJOB TITLE SUBMITTED: ${jobTitle}\n\nReturn exactly this JSON structure and nothing else:\n{\n  \"fit_score\": <integer 1-10>,\n  \"fit_tier\": \"<Hot|Warm|Cold>\",\n  \"fit_reasoning\": \"<2 sentences max explaining the score>\",\n  \"icp_matches\": [\"<list of criteria this company meets>\"],\n  \"icp_gaps\": [\"<list of criteria this company misses>\"],\n  \"suggested_action\": \"<Book meeting immediately|Enroll in nurture sequence|Disqualify>\",\n  \"personalization_hook\": \"<one specific observation about this company to use in outreach>\"\n}`;\n\nreturn [{ json: { user_message: userMessage } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        0
+      ],
+      "id": "cd83bbe4-e316-40b0-8c83-bb1df1a5b95c",
+      "name": "Build OpenAI Prompt"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawDomain = $input.first().json.body['Company Website'] || '';\n\n// Strip https://, http://, www. to get clean domain\nconst cleanDomain = rawDomain\n  .replace(/^https?:\\/\\//, '')\n  .replace(/^www\\./, '')\n  .replace(/\\/$/, '');\n\nreturn [{\n  json: {\n    domain: cleanDomain,\n    job_title: $input.first().json.body['Job Title '],\n    raw_domain: rawDomain\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "5e80b07d-fec4-44c8-80b0-d01283083ab5",
+      "name": "CleanDomain "
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get OpenAI response\nconst rawContent = $input.first().json.choices[0].message.content;\n\n// Parse OpenAI JSON response\nlet parsed;\ntry {\n  parsed = JSON.parse(rawContent);\n} catch (error) {\n  parsed = {\n    fit_score: 0,\n    fit_tier: \"Cold\",\n    fit_reasoning: \"Could not parse scoring response.\",\n    icp_matches: [],\n    icp_gaps: [\"Parsing error\"],\n    suggested_action: \"Disqualify\",\n    personalization_hook: \"\"\n  };\n}\n\n// Get Apollo org data safely\nlet org = {};\ntry {\n  org = $('Apollo Enrichment').first().json.organization || {};\n} catch(e) {\n  org = {};\n}\n\n// Get webhook form data safely  \nlet webhookBody = {};\ntry {\n  webhookBody = $('Webhook').first().json.body || {};\n} catch(e) {\n  webhookBody = {};\n}\n\n// Get clean domain safely\nlet cleanDomain = '';\ntry {\n  cleanDomain = $('CleanDomain').first().json.domain || '';\n} catch(e) {\n  cleanDomain = '';\n}\n\n// Return flat merged object\nreturn [{\n  json: {\n    fit_score: parsed.fit_score,\n    fit_tier: parsed.fit_tier,\n    fit_reasoning: parsed.fit_reasoning,\n    icp_matches: parsed.icp_matches,\n    icp_gaps: parsed.icp_gaps,\n    suggested_action: parsed.suggested_action,\n    personalization_hook: parsed.personalization_hook,\n    company_name: org.name || 'Unknown',\n    industry: org.industry || 'Unknown',\n    employee_count: org.estimated_num_employees || 0,\n    description: org.short_description || '',\n    tech_stack: org.technology_names || [],\n    linkedin: org.linkedin_url || '',\n    primary_domain: org.primary_domain || '',\n    job_title: webhookBody['Job Title '] || 'Unknown',\n    prospect_email: webhookBody['Work Email'] || webhookBody['Email Address'] || '',\n    domain: cleanDomain,\n    processed_at: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "d8102340-bd09-41e5-945d-86c888111648",
+      "name": "Clean ICP Match Output "
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"response_format\": { \"type\": \"json_object\" },\n  \"temperature\": 0.7,\n  \"max_tokens\": 500,\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a B2B sales rep writing warm follow-up emails to inbound leads who just expressed interest in your product. Write concise, personalized responses that feel human and timely. Return only valid JSON with keys 'subject' and 'body'. No markdown.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify(\"Write a warm follow-up email for an inbound lead who just submitted a demo request form.\\n\\nSENDER CONTEXT: We help B2B revenue teams automate GTM workflows using AI — saving 10+ hours/week on manual prospecting, routing, and reporting.\\n\\nPROSPECT:\\nCompany: \" + $json.company_name + \"\\nIndustry: \" + $json.industry + \"\\nEmployees: \" + $json.employee_count + \"\\nJob Title: \" + $json.job_title + \"\\nTech Stack: \" + $json.tech_stack.join(', ') + \"\\nPersonalization Hook: \" + $json.personalization_hook + \"\\nWhy they are a good fit: \" + $json.fit_reasoning + \"\\n\\nREQUIREMENTS:\\n- Subject: warm, references their company, does not sound like a cold email\\n- Body: 3-4 sentences max\\n- Acknowledge they reached out — they came to us\\n- Reference one specific thing about their company that shows you did your homework\\n- One concrete outcome we deliver relevant to their role and company size\\n- CTA: offer a specific time or ask for their availability this week\\n- Tone: warm, direct, peer-to-peer — they already know who we are\\n\\nReturn as JSON: {\\\"subject\\\": \\\"...\\\", \\\"body\\\": \\\"...\\\"}\") }}\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1504,
+        -16
+      ],
+      "id": "deea7472-1faa-459f-a931-8ce1c1616b6c",
+      "name": "Email Draft",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "r9JdvXc2Vm48xKot",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawContent = $input.first().json.choices[0].message.content;\n\nlet emailParsed;\ntry {\n  emailParsed = JSON.parse(rawContent);\n} catch(e) {\n  emailParsed = {\n    subject: 'Following up on your demo request',\n    body: 'Could not generate email draft — please follow up manually.'\n  };\n}\n\n// The IF node passed ICP data through unchanged\n// so it has everything from Clean ICP Match Output\nlet icpData = {};\ntry {\n  icpData = $('Hot/Warm Lead?').first().json || {};\n} catch(e) {\n  icpData = {};\n}\n\nreturn [{\n  json: {\n    ...icpData,\n    email_subject: emailParsed.subject,\n    email_body: emailParsed.body,\n    email_drafted: true,\n    workflow_stage: 'email_ready_for_review'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        -16
+      ],
+      "id": "c11849db-7783-43ba-8f20-e2fad0d4e4b4",
+      "name": "Parse Email Draft"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.fit_tier }}",
+                    "rightValue": "Hot",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "148fb0f4-3bc3-4a22-b824-19c28094672e"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Hot Leads"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "aa726bbb-2c15-4c29-b8ac-991e1742c6d4",
+                    "leftValue": "={{ $json.fit_tier }}",
+                    "rightValue": "Warm",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Warm Leads"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1920,
+        -16
+      ],
+      "id": "cf161e01-b326-4bdf-aea2-d5e79e805f14",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/companies/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"filterGroups\": [{\n    \"filters\": [{\n      \"propertyName\": \"domain\",\n      \"operator\": \"EQ\",\n      \"value\": {{ JSON.stringify($json.primary_domain) }}\n    }]\n  }],\n  \"properties\": [\"name\", \"hubspot_owner_id\", \"domain\"],\n  \"limit\": 1\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2192,
+        -112
+      ],
+      "id": "25669f00-f733-4e7b-b88f-bceeea8b10fa",
+      "name": "Hubspot Company Search",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "T7gK9DidA1RDCQNA",
+          "name": "Header Auth account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "abdfa138-d370-4923-acd7-3204be5cc35a",
+              "leftValue": "={{ $json.total }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2384,
+        -112
+      ],
+      "id": "7f468e49-2bd0-4c3b-b89b-9e317e1875cc",
+      "name": "Does the comoany exist?"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.hubapi.com/crm/v3/owners/{{ $json.results[0].properties.hubspot_owner_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2576,
+        -208
+      ],
+      "id": "021773b9-b995-4e9c-92d2-b97a4a02d11a",
+      "name": "Get Owner Details",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "T7gK9DidA1RDCQNA",
+          "name": "Header Auth account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let leadData = {};\ntry {\n  leadData = $('Parse Email Draft').first().json || {};\n} catch(e) {\n  leadData = {};\n}\n\nconst employees = leadData.employee_count || 0;\nconst industry = (leadData.industry || '').toLowerCase();\n\nlet rep_email;\nlet rep_first_name;\nlet routing_reason;\n\nif (employees >= 500) {\n  rep_email = 'diinaelhlaly@gmail.com';\n  rep_first_name = 'Dena';\n  routing_reason = 'enterprise_territory';\n} else if (industry.includes('fintech') || \n           industry.includes('finance')) {\n  rep_email = 'diinaelhlaly@gmail.com';\n  rep_first_name = 'Dena';\n  routing_reason = 'fintech_vertical';\n} else {\n  rep_email = 'your@personalgmail.com';\n  rep_first_name = 'Dena';\n  routing_reason = 'default_routing';\n}\n\nreturn [{\n  json: {\n    ...leadData,\n    rep_email: rep_email,\n    rep_first_name: rep_first_name,\n    routing_reason: routing_reason\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2576,
+        -16
+      ],
+      "id": "3545126a-8967-4efe-957e-1c05bca71925",
+      "name": "Territory Assignment "
+    },
+    {
+      "parameters": {
+        "url": "https://slack.com/api/users.lookupByEmail",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "email",
+              "value": "={{ $json.email }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2960,
+        -208
+      ],
+      "id": "066495cf-a789-48b9-9974-86130169fce4",
+      "name": "Slack User Lookup",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "Ovd67t3imHClaox6",
+          "name": "Header Auth account 5"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "274493ae-f650-4358-8719-c751673598fb",
+              "leftValue": "={{ $json.fit_tier }}",
+              "rightValue": "Cold",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1248,
+        0
+      ],
+      "id": "14ea8e36-cf72-45a7-8b03-9f9b52a4be08",
+      "name": "Hot/Warm Lead?"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1FsAV0vf47-Kak_f2Ai6zaZ3ay5aYgMPSb17CZfuwBPg",
+          "mode": "list",
+          "cachedResultName": "GTM Intelligence Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1FsAV0vf47-Kak_f2Ai6zaZ3ay5aYgMPSb17CZfuwBPg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Hot Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1FsAV0vf47-Kak_f2Ai6zaZ3ay5aYgMPSb17CZfuwBPg/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company",
+              "displayName": "Company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Domain",
+              "displayName": "Domain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Industry",
+              "displayName": "Industry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Employees",
+              "displayName": "Employees",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Job Title",
+              "displayName": "Job Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Fit Score",
+              "displayName": "Fit Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Fit Tier",
+              "displayName": "Fit Tier",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Fit Reasoning",
+              "displayName": "Fit Reasoning",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ICP Matches",
+              "displayName": "ICP Matches",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ICP Gaps",
+              "displayName": "ICP Gaps",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Suggested Action",
+              "displayName": "Suggested Action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Rep Assigned",
+              "displayName": "Rep Assigned",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Routing Reason",
+              "displayName": "Routing Reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email Subject",
+              "displayName": "Email Subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email Body",
+              "displayName": "Email Body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ok",
+              "displayName": "ok",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "channel",
+              "displayName": "channel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "message_timestamp",
+              "displayName": "message_timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3568,
+        -208
+      ],
+      "id": "08ffdfa8-f3ec-4160-9f05-dc32cb1c57c7",
+      "name": "Log Hot Leads",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "KFZ7ByhVkSnhZauA",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1FsAV0vf47-Kak_f2Ai6zaZ3ay5aYgMPSb17CZfuwBPg",
+          "mode": "list",
+          "cachedResultName": "GTM Intelligence Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1FsAV0vf47-Kak_f2Ai6zaZ3ay5aYgMPSb17CZfuwBPg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 467015697,
+          "mode": "list",
+          "cachedResultName": "Warm Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1FsAV0vf47-Kak_f2Ai6zaZ3ay5aYgMPSb17CZfuwBPg/edit#gid=467015697"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company",
+              "displayName": "Company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Domain",
+              "displayName": "Domain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Industry",
+              "displayName": "Industry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Employees",
+              "displayName": "Employees",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Job Title",
+              "displayName": "Job Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Fit Score",
+              "displayName": "Fit Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Fit Tier",
+              "displayName": "Fit Tier",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Fit Reasoning",
+              "displayName": "Fit Reasoning",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ICP Matches",
+              "displayName": "ICP Matches",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ICP Gaps",
+              "displayName": "ICP Gaps",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Suggested Action",
+              "displayName": "Suggested Action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Rep Assigned",
+              "displayName": "Rep Assigned",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Routing Reason",
+              "displayName": "Routing Reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email Subject",
+              "displayName": "Email Subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email Body",
+              "displayName": "Email Body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2176,
+        160
+      ],
+      "id": "ffc163eb-eaab-416b-8d2c-82a3378852bd",
+      "name": "Log Warm Leads",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "KFZ7ByhVkSnhZauA",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1FsAV0vf47-Kak_f2Ai6zaZ3ay5aYgMPSb17CZfuwBPg",
+          "mode": "list",
+          "cachedResultName": "GTM Intelligence Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1FsAV0vf47-Kak_f2Ai6zaZ3ay5aYgMPSb17CZfuwBPg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 186249097,
+          "mode": "list",
+          "cachedResultName": "Cold Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1FsAV0vf47-Kak_f2Ai6zaZ3ay5aYgMPSb17CZfuwBPg/edit#gid=186249097"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company",
+              "displayName": "Company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Domain",
+              "displayName": "Domain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Industry",
+              "displayName": "Industry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Employees",
+              "displayName": "Employees",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Job Title",
+              "displayName": "Job Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Fit Score",
+              "displayName": "Fit Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Fit Tier",
+              "displayName": "Fit Tier",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Fit Reasoning",
+              "displayName": "Fit Reasoning",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ICP Matches",
+              "displayName": "ICP Matches",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ICP Gaps",
+              "displayName": "ICP Gaps",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Suggested Action",
+              "displayName": "Suggested Action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Rep Assigned",
+              "displayName": "Rep Assigned",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Routing Reason",
+              "displayName": "Routing Reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email Subject",
+              "displayName": "Email Subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email Body",
+              "displayName": "Email Body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1488,
+        224
+      ],
+      "id": "9ff43019-e110-43e3-ab51-4b6956059109",
+      "name": "Log Cold Leads",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "KFZ7ByhVkSnhZauA",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [$input.first()];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2752,
+        -112
+      ],
+      "id": "d88a0a1f-68cc-4ff9-bb71-80f47815c167",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const slackUserId = $input.first().json.user?.id || '';\n\nlet leadData = {};\ntry {\n  leadData = $('Parse Email Draft').first().json || {};\n} catch(e) {\n  leadData = {};\n}\n\nreturn [{\n  json: {\n    ...leadData,\n    slack_user_id: slackUserId\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3168,
+        -208
+      ],
+      "id": "b65ac635-fac9-454c-b130-b8584b7cbb6f",
+      "name": "Combine all data needed"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel\": \"{{ $json.slack_user_id }}\",\n  \"text\": \"🔥 New Hot Lead: {{ $json.company_name }} - Score {{ $json.fit_score }}/10\",\n  \"blocks\": [\n    {\n      \"type\": \"header\",\n      \"text\": {\n        \"type\": \"plain_text\",\n        \"text\": \"🔥 HOT LEAD — {{ $json.company_name }} ({{ $json.fit_score }}/10)\"\n      }\n    },\n    {\n      \"type\": \"section\",\n      \"fields\": [\n        { \"type\": \"mrkdwn\", \"text\": \"*Company:*\\n{{ $json.company_name }}\" },\n        { \"type\": \"mrkdwn\", \"text\": \"*Industry:*\\n{{ $json.industry }}\" },\n        { \"type\": \"mrkdwn\", \"text\": \"*Employees:*\\n{{ $json.employee_count }}\" },\n        { \"type\": \"mrkdwn\", \"text\": \"*Job Title:*\\n{{ $json.job_title }}\" },\n        { \"type\": \"mrkdwn\", \"text\": \"*Domain:*\\n{{ $json.primary_domain }}\" },\n        { \"type\": \"mrkdwn\", \"text\": \"*ICP Score:*\\n{{ $json.fit_score }}/10\" }\n      ]\n    },\n    {\n      \"type\": \"section\",\n      \"text\": { \"type\": \"mrkdwn\", \"text\": \"*Why they fit:*\\n{{ $json.fit_reasoning }}\" }\n    },\n    { \"type\": \"divider\" },\n    {\n      \"type\": \"section\",\n      \"text\": { \"type\": \"mrkdwn\", \"text\": \"📧 *Draft Email Ready*\\n*Subject:* {{ $json.email_subject }}\" }\n    },\n    {\n      \"type\": \"section\",\n      \"text\": { \"type\": \"mrkdwn\", \"text\": \"```{{ $json.email_body }}```\" }\n    },\n    {\n      \"type\": \"actions\",\n      \"elements\": [\n        {\n          \"type\": \"button\",\n          \"text\": { \"type\": \"plain_text\", \"text\": \"✉️ Edit & Send\" },\n          \"style\": \"primary\",\n          \"url\": \"mailto:{{ $json.prospect_email }}?subject={{ $json.email_subject.replace(/ /g, '%20') }}&body={{ $json.email_body.replace(/ /g, '%20').replace(/\\n/g, '%0A') }}\"\n        }\n      ]\n    },\n    {\n      \"type\": \"context\",\n      \"elements\": [\n        { \"type\": \"mrkdwn\", \"text\": \"Processed in under 60 seconds | {{ $json.processed_at }}\" }\n      ]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3376,
+        -208
+      ],
+      "id": "27ac9fc4-fcfc-45fd-bf3e-aa40761d7c5c",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "Ovd67t3imHClaox6",
+          "name": "Header Auth account 5"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "CleanDomain ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apollo Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Build OpenAI Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build OpenAI Prompt": {
+      "main": [
+        [
+          {
+            "node": "ICP Match",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CleanDomain ": {
+      "main": [
+        [
+          {
+            "node": "Apollo Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ICP Match": {
+      "main": [
+        [
+          {
+            "node": "Clean ICP Match Output ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean ICP Match Output ": {
+      "main": [
+        [
+          {
+            "node": "Hot/Warm Lead?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Draft": {
+      "main": [
+        [
+          {
+            "node": "Parse Email Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Email Draft": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Hubspot Company Search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Warm Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hubspot Company Search": {
+      "main": [
+        [
+          {
+            "node": "Does the comoany exist?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Does the comoany exist?": {
+      "main": [
+        [
+          {
+            "node": "Get Owner Details",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Territory Assignment ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Owner Details": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Territory Assignment ": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack User Lookup": {
+      "main": [
+        [
+          {
+            "node": "Combine all data needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hot/Warm Lead?": {
+      "main": [
+        [
+          {
+            "node": "Email Draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Cold Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Slack User Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine all data needed": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Log Hot Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "d4ba7cb7-cbb2-4a17-a81c-14d73ccd8ec1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3ff32b648352566b1777c54b23aac75f923e556e9ebcfdca797e58b40e3df213"
+  },
+  "id": "b58Jz8cih1JQxtvt",
+  "tags": []
+}
